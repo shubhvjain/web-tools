@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>note2svg — Capture → Edit → SVG</title>
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Cropper.js (for cropping) -->
+  <link href="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.css" rel="stylesheet">
+  <style>
+    body { background: #f7f7f9; }
+    .preview-wrap {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: .5rem;
+      min-height: 280px; display: flex; align-items: center; justify-content: center;
+      overflow: hidden; position: relative;
+    }
+    #previewImg { max-width: 100%; height: auto; display: none; }
+    #svgPreview {
+      background: #fff; border: 1px solid #e5e7eb; border-radius: .5rem; min-height: 240px;
+      overflow: auto; padding: 1rem;
+    }
+    .toolbox .form-range { width: 220px; }
+    .video-wrap video { width: 100%; border-radius: .5rem; }
+    .codebox { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .small-muted { font-size: .875rem; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <h1 class="h3 mb-3 text-center">note2svg</h1>
+    <p class="text-center text-secondary mb-4">Capture a note, tweak it, and convert to SVG — all in your browser.</p>
+
+    <!-- Controls -->
+    <div class="d-flex flex-wrap gap-3 justify-content-center mb-3">
+      <button id="captureBtn" class="btn btn-outline-primary">📷 Capture note</button>
+
+      <label class="btn btn-primary mb-0">
+        📁 Load <input id="fileInput" type="file" accept="image/*" hidden>
+      </label>
+
+      <div class="toolbox d-flex flex-wrap align-items-center gap-3">
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-nowrap">Brightness</span>
+          <input id="brightnessRange" class="form-range" type="range" min="-100" max="100" step="1" value="0">
+          <button id="applyBrightness" class="btn btn-sm btn-outline-secondary">Apply</button>
+          <button id="resetBrightness" class="btn btn-sm btn-outline-secondary">Reset</button>
+        </div>
+
+        <div class="btn-group">
+          <button id="startCrop" class="btn btn-outline-secondary">Start crop</button>
+          <button id="applyCrop" class="btn btn-outline-secondary">Apply crop</button>
+          <button id="cancelCrop" class="btn btn-outline-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Enhance + Convert row -->
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="preview-wrap">
+          <img id="previewImg" alt="Preview">
+          <div id="placeholder" class="text-secondary text-center p-4">
+            <div class="mb-2">No image yet</div>
+            <div class="small">Use <strong>Capture note</strong> or <strong>Load</strong> to begin.</div>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 gap-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="enhanceCheckbox" checked>
+            <label class="form-check-label" for="enhanceCheckbox">Auto-enhance (grayscale + contrast)</label>
+          </div>
+          <div class="d-flex gap-2">
+            <button id="applyEnhancePreview" class="btn btn-sm btn-outline-secondary" disabled>Apply to preview</button>
+            <button id="downloadPNG" class="btn btn-sm btn-outline-primary" disabled>Download PNG</button>
+          </div>
+        </div>
+        <p class="small-muted mt-1">
+          Tip: Auto-enhance is applied again at conversion time for the cleanest SVG.
+        </p>
+      </div>
+
+      <!-- Conversion panel -->
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Convert to SVG</span>
+            <div class="d-flex align-items-center gap-2">
+              <label for="presetSelect" class="form-label m-0">Preset</label>
+              <select id="presetSelect" class="form-select form-select-sm">
+                <option value="default">Default</option>
+                <option value="sketch">Sketch</option>
+                <option value="bw">Black &amp; White</option>
+                <option value="high">High detail</option>
+                <option value="poster">Posterized</option>
+              </select>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="svgOptions" class="row g-3">
+              <div class="col-6">
+                <label class="form-label">Colors</label>
+                <input type="number" class="form-control" id="optColors" min="2" max="64" value="8">
+              </div>
+              <div class="col-6">
+                <label class="form-label">Stroke width</label>
+                <input type="number" class="form-control" id="optStroke" min="0" step="0.5" value="0">
+              </div>
+              <div class="col-6">
+                <label class="form-label">Path omit (px)</label>
+                <input type="number" class="form-control" id="optPathOmit" min="0" value="8">
+              </div>
+              <div class="col-6">
+                <label class="form-label">Curve precision (qtres)</label>
+                <input type="number" class="form-control" id="optQtres" min="0" step="0.1" value="1">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Line threshold (ltres)</label>
+                <input type="number" class="form-control" id="optLtres" min="0" step="0.1" value="1">
+              </div>
+              <div class="col-12 d-grid">
+                <button id="convertBtn" type="button" class="btn btn-success" disabled>Convert to SVG</button>
+              </div>
+            </form>
+
+            <div class="mt-3">
+              <div id="svgPreview" aria-label="SVG preview"></div>
+              <div class="d-flex gap-2 justify-content-end mt-2">
+                <button id="downloadSVG" class="btn btn-sm btn-outline-success" disabled>Download SVG</button>
+                <button id="copySVG" class="btn btn-sm btn-outline-secondary" disabled>Copy SVG</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <details class="mt-3">
+          <summary class="text-secondary">Show SVG source</summary>
+          <textarea id="svgSource" class="form-control codebox mt-2" rows="8" readonly></textarea>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Camera Modal -->
+  <div class="modal fade" id="cameraModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Capture note</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" id="closeCamera"></button>
+        </div>
+        <div class="modal-body">
+          <div class="video-wrap">
+            <video id="video" autoplay playsinline></video>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="snapBtn" class="btn btn-primary">Capture</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden working canvas -->
+  <canvas id="workCanvas" style="display:none;"></canvas>
+
+  <!-- Dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
+  <!-- ImageTracer.js (bitmap → SVG) -->
+  <script src="https://cdn.jsdelivr.net/gh/jankovicsandras/imagetracerjs/imagetracer_v1.2.6.min.js"></script>
+
+  <script>
+    // --- Elements
+    const fileInput = document.getElementById('fileInput');
+    const previewImg = document.getElementById('previewImg');
+    const placeholder = document.getElementById('placeholder');
+    const brightnessRange = document.getElementById('brightnessRange');
+    const applyBrightnessBtn = document.getElementById('applyBrightness');
+    const resetBrightnessBtn = document.getElementById('resetBrightness');
+    const startCropBtn = document.getElementById('startCrop');
+    const applyCropBtn = document.getElementById('applyCrop');
+    const cancelCropBtn = document.getElementById('cancelCrop');
+    const convertBtn = document.getElementById('convertBtn');
+    const downloadSVG = document.getElementById('downloadSVG');
+    const copySVG = document.getElementById('copySVG');
+    const svgPreview = document.getElementById('svgPreview');
+    const svgSource = document.getElementById('svgSource');
+    const downloadPNG = document.getElementById('downloadPNG');
+    const workCanvas = document.getElementById('workCanvas');
+    const enhanceCheckbox = document.getElementById('enhanceCheckbox');
+    const applyEnhancePreview = document.getElementById('applyEnhancePreview');
+    const presetSelect = document.getElementById('presetSelect');
+
+    // Camera modal
+    const captureBtn = document.getElementById('captureBtn');
+    const cameraModalEl = document.getElementById('cameraModal');
+    const cameraModal = new bootstrap.Modal(cameraModalEl);
+    const video = document.getElementById('video');
+    const snapBtn = document.getElementById('snapBtn');
+    const closeCamera = document.getElementById('closeCamera');
+
+    let stream = null;
+    let cropper = null;
+    let currentBrightness = 0; // -100..100
+
+    // --- Helpers
+    function enableActions(enabled) {
+      convertBtn.disabled = !enabled;
+      downloadPNG.disabled = !enabled;
+      applyEnhancePreview.disabled = !enabled;
+    }
+    function hasImage() { return !!previewImg.src && previewImg.style.display !== 'none'; }
+
+    function loadImageFromDataURL(dataURL) {
+      previewImg.onload = () => {
+        placeholder.style.display = 'none';
+        previewImg.style.display = 'block';
+        if (cropper) { cropper.destroy(); cropper = null; }
+        currentBrightness = 0;
+        brightnessRange.value = 0;
+        enableActions(true);
+      };
+      previewImg.src = dataURL;
+    }
+
+    function fileToDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function bakeToCanvas(applyBrightness = true) {
+      // Draw current preview (with cropper selection if active)
+      const img = previewImg;
+      const canvas = workCanvas;
+      let width = img.naturalWidth;
+      let height = img.naturalHeight;
+
+      if (cropper) {
+        const data = cropper.getData(true);
+        width = Math.max(1, Math.round(data.width));
+        height = Math.max(1, Math.round(data.height));
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      if (cropper) {
+        const sourceCanvas = cropper.getCroppedCanvas({ width, height, imageSmoothingEnabled: true });
+        ctx.drawImage(sourceCanvas, 0, 0);
+      } else {
+        ctx.drawImage(img, 0, 0, width, height);
+      }
+
+      if (applyBrightness && currentBrightness !== 0) {
+        applyBrightnessOnCtx(ctx, width, height, currentBrightness);
+      }
+      return canvas;
+    }
+
+    function updatePreviewFromCanvas() {
+      const dataURL = workCanvas.toDataURL('image/png');
+      loadImageFromDataURL(dataURL);
+    }
+
+    // --- Basic brightness (adds or subtracts offset)
+    function applyBrightnessOnCtx(ctx, w, h, amount) {
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      const offset = Math.round(255 * (amount / 100) * 0.5);
+      for (let i = 0; i < data.length; i += 4) {
+        data[i]   = clamp255(data[i] + offset);
+        data[i+1] = clamp255(data[i+1] + offset);
+        data[i+2] = clamp255(data[i+2] + offset);
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    function clamp255(v){ return v < 0 ? 0 : (v > 255 ? 255 : v); }
+
+    // --- Auto-enhance (grayscale + contrast stretch using 2%/98% percentiles)
+    function autoEnhanceOnCanvas(canvas) {
+      const w = canvas.width, h = canvas.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const d = imgData.data;
+
+      // Grayscale (luma)
+      for (let i = 0; i < d.length; i += 4) {
+        const y = Math.round(0.2126 * d[i] + 0.7152 * d[i+1] + 0.0722 * d[i+2]);
+        d[i] = d[i+1] = d[i+2] = y;
+      }
+
+      // Build histogram
+      const hist = new Uint32Array(256);
+      for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
+
+      const total = (d.length / 4);
+      const lowTarget = total * 0.02;
+      const highTarget = total * 0.98;
+
+      let cum = 0, low = 0, high = 255;
+      for (let i = 0; i < 256; i++) { cum += hist[i]; if (cum >= lowTarget) { low = i; break; } }
+      cum = 0;
+      for (let i = 255; i >= 0; i--) { cum += hist[i]; if (cum >= (total - highTarget)) { high = i; break; } }
+      if (high <= low) { low = 0; high = 255; }
+
+      const scale = 255 / (high - low);
+      for (let i = 0; i < d.length; i += 4) {
+        let y = (d[i] - low) * scale;
+        y = clamp255(Math.round(y));
+        d[i] = d[i+1] = d[i+2] = y;
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+      return canvas;
+    }
+
+    // --- Load image (file)
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const dataURL = await fileToDataURL(file);
+      loadImageFromDataURL(dataURL);
+      e.target.value = ''; // reset
+    });
+
+    // --- Download PNG
+    downloadPNG.addEventListener('click', () => {
+      if (!hasImage()) return;
+      const canvas = bakeToCanvas(true);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = 'note.png';
+      a.click();
+    });
+
+    // --- Brightness
+    applyBrightnessBtn.addEventListener('click', () => {
+      if (!hasImage()) return;
+      currentBrightness = Number(brightnessRange.value) || 0;
+      bakeToCanvas(true);
+      updatePreviewFromCanvas();
+    });
+    resetBrightnessBtn.addEventListener('click', () => {
+      if (!hasImage()) return;
+      currentBrightness = 0;
+      brightnessRange.value = 0;
+      bakeToCanvas(false);
+      updatePreviewFromCanvas();
+    });
+
+    // --- Crop
+    startCropBtn.addEventListener('click', () => {
+      if (!hasImage()) return;
+      if (cropper) return;
+      cropper = new Cropper(previewImg, {
+        viewMode: 1,
+        autoCropArea: 0.9,
+        movable: true,
+        zoomable: true,
+        background: false
+      });
+    });
+
+    applyCropBtn.addEventListener('click', () => {
+      if (!cropper) return;
+      bakeToCanvas(true);
+      updatePreviewFromCanvas();
+      cropper.destroy();
+      cropper = null;
+    });
+
+    cancelCropBtn.addEventListener('click', () => {
+      if (!cropper) return;
+      cropper.destroy();
+      cropper = null;
+    });
+
+    // --- Apply auto-enhance to preview (non-destructive; can reapply)
+    applyEnhancePreview.addEventListener('click', () => {
+      if (!hasImage()) return;
+      const canvas = bakeToCanvas(true);
+      autoEnhanceOnCanvas(canvas);
+      updatePreviewFromCanvas();
+    });
+
+    // --- Camera capture
+    captureBtn.addEventListener('click', async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+        video.srcObject = stream;
+        cameraModal.show();
+      } catch (err) {
+        alert('Could not access the camera. Please allow camera permission or use the Load button.');
+      }
+    });
+
+    function stopStream() {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+    }
+    cameraModalEl.addEventListener('hidden.bs.modal', stopStream);
+    closeCamera.addEventListener('click', () => cameraModal.hide());
+
+    snapBtn.addEventListener('click', () => {
+      if (!stream) return;
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      const vWidth = settings.width || video.videoWidth || 1280;
+      const vHeight = settings.height || video.videoHeight || 720;
+
+      workCanvas.width = vWidth;
+      workCanvas.height = vHeight;
+      const ctx = workCanvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, vWidth, vHeight);
+      const dataURL = workCanvas.toDataURL('image/png');
+      loadImageFromDataURL(dataURL);
+      cameraModal.hide();
+    });
+
+    // --- Presets
+    const optColors = document.getElementById('optColors');
+    const optStroke = document.getElementById('optStroke');
+    const optPathOmit = document.getElementById('optPathOmit');
+    const optQtres = document.getElementById('optQtres');
+    const optLtres = document.getElementById('optLtres');
+
+    const presets = {
+      default:  { colors: 8,  stroke: 0,   omit: 8,  qtres: 1,   ltres: 1 },
+      sketch:   { colors: 4,  stroke: 1.5, omit: 4,  qtres: 1.2, ltres: 0.5 },
+      bw:       { colors: 2,  stroke: 0,   omit: 8,  qtres: 1,   ltres: 1 },
+      high:     { colors: 16, stroke: 0,   omit: 2,  qtres: 0.5, ltres: 0.5 },
+      poster:   { colors: 6,  stroke: 0,   omit: 10, qtres: 1.5, ltres: 1.2 },
+    };
+
+    function applyPreset(key){
+      const p = presets[key] || presets.default;
+      optColors.value = p.colors;
+      optStroke.value = p.stroke;
+      optPathOmit.value = p.omit;
+      optQtres.value = p.qtres;
+      optLtres.value = p.ltres;
+    }
+    presetSelect.addEventListener('change', e => applyPreset(e.target.value));
+    applyPreset('default');
+
+    // --- Convert to SVG (vectorize with ImageTracer)
+    convertBtn.addEventListener('click', () => {
+      if (!hasImage()) return;
+      // Prepare raster image
+      const canvas = bakeToCanvas(true);
+      if (enhanceCheckbox.checked) {
+        autoEnhanceOnCanvas(canvas);
+      }
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const options = {
+        numberofcolors: Math.max(2, Math.min(64, parseInt(optColors.value || '8', 10))),
+        strokewidth: Math.max(0, parseFloat(optStroke.value || '0')),
+        pathomit: Math.max(0, parseFloat(optPathOmit.value || '8')),
+        qtres: Math.max(0, parseFloat(optQtres.value || '1')),
+        ltres: Math.max(0, parseFloat(optLtres.value || '1')),
+        scale: 1,
+        viewbox: true,
+      };
+
+      const svgString = ImageTracer.imagedataToSVG(imgData, options);
+      svgPreview.innerHTML = svgString;
+      svgSource.value = svgString;
+      downloadSVG.disabled = false;
+      copySVG.disabled = false;
+    });
+
+    // --- Download / Copy SVG
+    downloadSVG.addEventListener('click', () => {
+      const blob = new Blob([svgSource.value], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'note.svg';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    copySVG.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(svgSource.value);
+        copySVG.textContent = 'Copied!';
+        setTimeout(() => (copySVG.textContent = 'Copy SVG'), 1200);
+      } catch {
+        alert('Copy failed. You can select the SVG source and copy manually.');
+      }
+    });
+
+    // Initial state
+    enableActions(false);
+  </script>
+</body>
+</html>
